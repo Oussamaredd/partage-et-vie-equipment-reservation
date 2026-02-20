@@ -1,0 +1,19 @@
+{
+  "name": "equipment-reservation-root",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "node infra/scripts/dev.mjs",
+    "docker:up": "node infra/scripts/dev.mjs up",
+    "docker:down": "node infra/scripts/dev.mjs down",
+    "docker:logs": "node infra/scripts/dev.mjs logs",
+    "docker:status": "node infra/scripts/dev.mjs status",
+    "docker:doctor": "node infra/scripts/dev.mjs doctor",
+    "docker:reset": "node infra/scripts/dev.mjs reset --yes",
+    "local:up": "node infra/scripts/dev.mjs local up",
+    "local:down": "node infra/scripts/dev.mjs local down",
+    "local:logs": "node infra/scripts/dev.mjs local logs all",
+    "local:status": "node infra/scripts/dev.mjs local status",
+    "local:reset": "node infra/scripts/dev.mjs local reset --yes"
+  }
+}

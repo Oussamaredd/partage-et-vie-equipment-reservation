@@ -1,0 +1,42 @@
+# yaml-language-server: $schema=../vendor/symfony/dependency-injection/Loader/schema/services.schema.json
+
+# This file is the entry point to configure your own services.
+# Files in the packages/ subdirectory configure your dependencies.
+# See also https://symfony.com/doc/current/service_container/import.html
+
+# Put parameters here that don't need to change on each machine where the app is deployed
+# https://symfony.com/doc/current/best_practices.html#use-parameters-for-application-configuration
+parameters:
+    app.jwt_ttl: '%env(int:APP_JWT_TTL)%'
+    app.reset_token_ttl: '%env(int:APP_RESET_TOKEN_TTL)%'
+    app.expose_reset_token: '%env(bool:APP_EXPOSE_RESET_TOKEN)%'
+
+services:
+    # default configuration for services in *this* file
+    _defaults:
+        autowire: true      # Automatically injects dependencies in your services.
+        autoconfigure: true # Automatically registers your services as commands, event subscribers, etc.
+
+    # makes classes in src/ available to be used as services
+    # this creates a service per class whose id is the fully-qualified class name
+    App\:
+        resource: '../src/'
+
+    App\Equipment\Domain\EquipmentRepositoryInterface: '@App\Shared\Infrastructure\Persistence\Doctrine\EquipmentDoctrineRepository'
+    App\Reservation\Domain\ReservationRepositoryInterface: '@App\Shared\Infrastructure\Persistence\Doctrine\ReservationDoctrineRepository'
+    App\Auth\Domain\UserRepositoryInterface: '@App\Shared\Infrastructure\Persistence\Doctrine\UserDoctrineRepository'
+    App\Auth\Domain\PasswordResetTokenRepositoryInterface: '@App\Shared\Infrastructure\Persistence\Doctrine\PasswordResetTokenDoctrineRepository'
+    App\Auth\Domain\PasswordHasherInterface: '@App\Auth\Infrastructure\Security\SymfonyPasswordHasher'
+
+    App\Auth\Infrastructure\Security\JwtTokenManager:
+        arguments:
+            $jwtSecret: '%env(APP_JWT_SECRET)%'
+            $jwtTtl: '%app.jwt_ttl%'
+
+    App\Auth\Application\PasswordReset\RequestPasswordResetService:
+        arguments:
+            $exposeResetToken: '%app.expose_reset_token%'
+            $resetTokenTtl: '%app.reset_token_ttl%'
+
+    # add more service definitions when explicit configuration is needed
+    # please note that last definitions always *replace* previous ones

@@ -1,0 +1,24 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Manrope:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --font-body: 'Manrope', 'Aptos', 'Segoe UI', sans-serif;
+  --font-heading: 'Fraunces', 'Cambria', 'Times New Roman', serif;
+  --ink-strong: #1f2a2f;
+  --ink-muted: #5b6770;
+  --ink-subtle: #7b8790;
+  --surface: #ffffff;
+  --surface-soft: #f6f8f7;
+  --surface-highlight: #eef3f0;
+  --border: #d5dfdb;
+  --border-strong: #b8c7c1;
+  --accent: #1d6269;
+  --accent-strong: #114951;
+  --danger-bg: #fff0ee;
+  --danger-border: #f2c1bb;
+  --danger-text: #8f2e24;
+  --success-bg: #ecf8f1;
+  --success-border: #b7dcc6;
+  --success-text: #246643;
+  --shadow-soft: 0 18px 38px rgba(31, 49, 56, 0.12);
+  --shadow-card: 0 8px 20px rgba(31, 49, 56, 0.08);
+}

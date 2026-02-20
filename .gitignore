@@ -1,0 +1,22 @@
+Sujet Test Technique Stagiaire.pdf
+
+# Backend
+api/vendor/
+api/var/
+api/.env
+api/.env.dev
+api/.env.local
+api/.env.*.local
+
+# Database
+database/sqlite/*.db
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+
+# Local dev tooling
+.dev/
