@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
 cleanup() {
-  node infra/scripts/dev.mjs down || true
+  node "$ROOT_DIR/infra/scripts/dev.mjs" down || true
 }
 
 trap cleanup EXIT
 
-cd frontend
+cd "$ROOT_DIR/frontend"
 npm ci
 npx playwright install --with-deps chromium
-cd ..
+cd "$ROOT_DIR"
 
 node infra/scripts/dev.mjs up
 
-cd frontend
-npm run test:e2e:all
+cd "$ROOT_DIR/frontend"
+PLAYWRIGHT_BASE_URL=http://127.0.0.1:5173 PLAYWRIGHT_DISABLE_WEBSERVER=1 npm run test:e2e:all
