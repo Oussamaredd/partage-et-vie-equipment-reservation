@@ -10,6 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Prepare backend env files for CI
+        run: |
+          cp api/.env.example api/.env
+          cp api/.env.dev.example api/.env.dev
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
@@ -35,6 +39,10 @@ jobs:
     needs: [backend, frontend]
     steps:
       - uses: actions/checkout@v4
+      - name: Prepare backend env files for CI
+        run: |
+          cp api/.env.example api/.env
+          cp api/.env.dev.example api/.env.dev
       - uses: actions/setup-node@v4
         with:
           node-version: 22
