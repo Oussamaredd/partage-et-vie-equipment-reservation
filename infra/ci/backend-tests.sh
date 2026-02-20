@@ -2,5 +2,6 @@
 set -euo pipefail
 
 cd api
-php bin/console doctrine:migrations:migrate --no-interaction
+mkdir -p ../database/sqlite
+APP_ENV=test php bin/console doctrine:migrations:migrate --no-interaction
 php bin/phpunit
