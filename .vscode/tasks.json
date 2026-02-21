@@ -1,0 +1,59 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "App: Local Up",
+      "type": "shell",
+      "command": "npm run dev:foreground",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "App: Local Up (Detached)",
+      "type": "shell",
+      "command": "npm run dev:detached",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "App: Local Down",
+      "type": "shell",
+      "command": "npm run local:down",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "App: Local Status",
+      "type": "shell",
+      "command": "npm run local:status",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "App: Docker Up",
+      "type": "shell",
+      "command": "npm run docker:up",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "App: Docker Down",
+      "type": "shell",
+      "command": "npm run docker:down",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

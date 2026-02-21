@@ -152,6 +152,95 @@ class ReservationApiTest extends WebTestCase
         self::assertResponseStatusCodeSame(Response::HTTP_BAD_REQUEST);
     }
 
+    public function testDeleteReservationRequiresAuthentication(): void
+    {
+        $client = static::createClient();
+        $client->request('DELETE', '/api/reservations/1');
+
+        self::assertResponseStatusCodeSame(Response::HTTP_UNAUTHORIZED);
+    }
+
+    public function testDeleteReservationSuccess(): void
+    {
+        $client = static::createClient();
+        $token = $this->loginAndGetToken($client);
+
+        $client->request(
+            'POST',
+            '/api/reservations',
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => sprintf('Bearer %s', $token),
+            ],
+            content: json_encode([
+                'equipmentId' => 2,
+                'startDate' => '2026-04-20 09:00:00',
+                'endDate' => '2026-04-20 18:00:00',
+            ], JSON_THROW_ON_ERROR)
+        );
+
+        self::assertResponseStatusCodeSame(Response::HTTP_CREATED);
+        $createPayload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        $reservationId = (int) ($createPayload['id'] ?? 0);
+        self::assertGreaterThan(0, $reservationId);
+
+        $client->request(
+            'DELETE',
+            sprintf('/api/reservations/%d', $reservationId),
+            server: [
+                'HTTP_AUTHORIZATION' => sprintf('Bearer %s', $token),
+            ],
+        );
+
+        self::assertResponseStatusCodeSame(Response::HTTP_OK);
+        self::assertSame(
+            'Reservation deleted successfully.',
+            json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR)['message'] ?? ''
+        );
+
+        $client->request(
+            'GET',
+            '/api/reservations',
+            server: [
+                'HTTP_AUTHORIZATION' => sprintf('Bearer %s', $token),
+            ],
+        );
+
+        self::assertResponseStatusCodeSame(Response::HTTP_OK);
+        $listPayload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($listPayload);
+        $foundDeletedReservation = false;
+        foreach ($listPayload as $reservation) {
+            if ((int) ($reservation['id'] ?? 0) === $reservationId) {
+                $foundDeletedReservation = true;
+                break;
+            }
+        }
+
+        self::assertFalse($foundDeletedReservation);
+    }
+
+    public function testDeleteReservationReturnsNotFoundWhenReservationDoesNotBelongToCurrentUser(): void
+    {
+        $client = static::createClient();
+        $token = $this->loginAndGetToken($client);
+        $seedReservationId = $this->findReservationIdByUserEmail('seed.user@company.test');
+
+        $client->request(
+            'DELETE',
+            sprintf('/api/reservations/%d', $seedReservationId),
+            server: [
+                'HTTP_AUTHORIZATION' => sprintf('Bearer %s', $token),
+            ],
+        );
+
+        self::assertResponseStatusCodeSame(Response::HTTP_NOT_FOUND);
+        self::assertSame(
+            'Reservation not found.',
+            json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR)['message'] ?? ''
+        );
+    }
+
     private function resetDatabase(EntityManagerInterface $entityManager): void
     {
         $metadata = $entityManager->getMetadataFactory()->getAllMetadata();
@@ -200,5 +289,19 @@ class ReservationApiTest extends WebTestCase
         $response = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
 
         return (string) ($response['token'] ?? '');
+    }
+
+    private function findReservationIdByUserEmail(string $userEmail): int
+    {
+        self::ensureKernelShutdown();
+        $kernel = self::bootKernel();
+        /** @var EntityManagerInterface $entityManager */
+        $entityManager = $kernel->getContainer()->get('doctrine.orm.entity_manager');
+        /** @var Reservation|null $reservation */
+        $reservation = $entityManager->getRepository(Reservation::class)->findOneBy(['userEmail' => $userEmail]);
+        self::assertNotNull($reservation);
+        self::ensureKernelShutdown();
+
+        return $reservation->getId() ?? 0;
     }
 }

@@ -8,7 +8,37 @@ import { createAppRouter } from '../../src/app/router'
 describe('Authentication routing and state', () => {
   beforeEach(() => {
     localStorage.clear()
+    useAuthSession().clearAuth()
     vi.restoreAllMocks()
+  })
+
+  it('redirects root to login when unauthenticated', async () => {
+    const router = createAppRouter(createMemoryHistory())
+
+    await router.push('/')
+    await router.isReady()
+
+    expect(router.currentRoute.value.path).toBe('/login')
+  })
+
+  it('keeps root on login even when authenticated', async () => {
+    const auth = useAuthSession()
+    auth.setAuth('header.eyJleHAiOjQxMDAwMDAwMDB9.signature', 'employee@company.test')
+
+    const router = createAppRouter(createMemoryHistory())
+    await router.push('/')
+    await router.isReady()
+
+    expect(router.currentRoute.value.path).toBe('/login')
+  })
+
+  it('renders not found route for unknown path', async () => {
+    const router = createAppRouter(createMemoryHistory())
+
+    await router.push('/this-page-does-not-exist')
+    await router.isReady()
+
+    expect(router.currentRoute.value.matched.at(-1)?.path).toBe('/:pathMatch(.*)*')
   })
 
   it('redirects protected route to login when unauthenticated', async () => {
@@ -27,7 +57,7 @@ describe('Authentication routing and state', () => {
 
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ token: 'jwt-token', email: 'employee@company.test' }),
+      json: async () => ({ token: 'header.eyJleHAiOjQxMDAwMDAwMDB9.signature', email: 'employee@company.test' }),
     })
     vi.stubGlobal('fetch', fetchMock)
 
@@ -43,7 +73,7 @@ describe('Authentication routing and state', () => {
     await flushPromises()
 
     expect(fetchMock).toHaveBeenCalledOnce()
-    expect(localStorage.getItem('auth_token')).toBe('jwt-token')
+    expect(localStorage.getItem('auth_token')).toBe('header.eyJleHAiOjQxMDAwMDAwMDB9.signature')
     expect(router.currentRoute.value.path).toBe('/reservations/new')
   })
 
@@ -55,5 +85,18 @@ describe('Authentication routing and state', () => {
 
     expect(localStorage.getItem('auth_token')).toBeNull()
     expect(auth.state.token).toBe('')
+  })
+
+  it('redirects protected route to login and clears malformed token', async () => {
+    const auth = useAuthSession()
+    auth.setAuth('malformed-token', 'employee@company.test')
+
+    const router = createAppRouter(createMemoryHistory())
+    await router.push('/reservations/new')
+    await router.isReady()
+
+    expect(router.currentRoute.value.path).toBe('/login')
+    expect(auth.state.token).toBe('')
+    expect(localStorage.getItem('auth_token')).toBeNull()
   })
 })

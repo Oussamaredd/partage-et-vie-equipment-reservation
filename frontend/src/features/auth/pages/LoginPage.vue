@@ -35,7 +35,10 @@ async function onSubmit(payload) {
       <p class="panel-subtitle">Use your credentials to manage reservations and track your current bookings.</p>
     </header>
 
-    <LoginForm :loading="loading" @submit="onSubmit" />
+    <section class="form-block">
+      <p class="block-title">Your credentials</p>
+      <LoginForm :loading="loading" @submit="onSubmit" />
+    </section>
     <FeedbackMessage testid="login-feedback" type="error" :message="feedback" />
     <p class="inline-links"><RouterLink to="/signup">Create account</RouterLink> | <RouterLink to="/forgot-password">Forgot password</RouterLink></p>
   </section>

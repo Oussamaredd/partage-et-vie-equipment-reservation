@@ -22,6 +22,20 @@ class ReservationDoctrineRepository extends ServiceEntityRepository implements R
         $this->getEntityManager()->flush();
     }
 
+    public function deleteByIdAndUserEmail(int $reservationId, string $userEmail): bool
+    {
+        $deleted = $this->createQueryBuilder('r')
+            ->delete()
+            ->andWhere('r.id = :id')
+            ->andWhere('r.userEmail = :userEmail')
+            ->setParameter('id', $reservationId)
+            ->setParameter('userEmail', $userEmail)
+            ->getQuery()
+            ->execute();
+
+        return $deleted > 0;
+    }
+
     public function hasOverlap(Equipment $equipment, DateTimeImmutable $startDate, DateTimeImmutable $endDate): bool
     {
         $conflict = $this->createQueryBuilder('r')

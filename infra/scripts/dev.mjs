@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
+import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -13,13 +14,14 @@ const __dirname = path.dirname(__filename);
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 
 const PATHS = {
-  composeFile: path.join(REPO_ROOT, 'infra', 'docker', 'docker-compose.yml'),
+  composeFile: path.join(REPO_ROOT, 'docker-compose.yml'),
   apiDir: path.join(REPO_ROOT, 'api'),
   frontendDir: path.join(REPO_ROOT, 'frontend'),
   dbFile: path.join(REPO_ROOT, 'database', 'sqlite', 'data.db'),
   stateDir: path.join(REPO_ROOT, '.dev'),
   logsDir: path.join(REPO_ROOT, '.dev', 'logs'),
   stateFile: path.join(REPO_ROOT, '.dev', 'local-state.json'),
+  bootstrapStateFile: path.join(REPO_ROOT, '.dev', 'bootstrap-state.json'),
   apiLog: path.join(REPO_ROOT, '.dev', 'logs', 'api.log'),
   frontendLog: path.join(REPO_ROOT, '.dev', 'logs', 'frontend.log'),
 };
@@ -27,14 +29,14 @@ const PATHS = {
 const SERVICES = {
   api: {
     displayName: 'API',
-    port: 8000,
-    url: 'http://127.0.0.1:8000/api/equipment',
+    defaultPort: 8000,
+    healthPath: '/api/equipment',
     logFile: PATHS.apiLog,
   },
   frontend: {
     displayName: 'Frontend',
-    port: 5173,
-    url: 'http://127.0.0.1:5173',
+    defaultPort: 5173,
+    healthPath: '',
     logFile: PATHS.frontendLog,
   },
 };
@@ -55,17 +57,20 @@ Usage:
   dev logs [api|frontend]
   dev status
   dev doctor
-  dev reset --yes
+  dev reset [local|docker|all] --yes
 
-  dev local up
-  dev local down
+  dev local up [--foreground]
+  dev local down [--orphans]
   dev local logs [api|frontend|all] [--follow]
   dev local status
   dev local reset --yes
 
 Notes:
   - Top-level commands target Docker mode by default.
+  - Reset defaults to local scope unless "docker" or "all" is specified.
   - Local mode manages background processes in .dev/local-state.json.
+  - If 8000/5173 are busy, local mode picks the next free ports automatically.
+  - Use "--foreground" to keep local services attached to the current terminal.
   - Local logs are written to .dev/logs/.
 `;
 
@@ -105,7 +110,7 @@ async function main() {
       await doctor();
       return;
     case 'reset':
-      await localReset(rest);
+      await resetCommand(rest, { defaultScope: 'local', allowScopeOverride: true });
       return;
     default:
       throw new Error(`Unknown command: "${command}". Run "dev --help".`);
@@ -122,10 +127,10 @@ async function handleLocalCommand(args) {
 
   switch (command) {
     case 'up':
-      await localUp();
+      await localUp(rest);
       return;
     case 'down':
-      await localDown();
+      await localDown({ args: rest });
       return;
     case 'logs':
       await localLogs(rest);
@@ -137,7 +142,7 @@ async function handleLocalCommand(args) {
       await doctor();
       return;
     case 'reset':
-      await localReset(rest);
+      await resetCommand(rest, { defaultScope: 'local', allowScopeOverride: false });
       return;
     default:
       throw new Error(`Unknown local command: "${command}". Run "dev --help".`);
@@ -159,10 +164,14 @@ async function dockerUp() {
   console.log('Starting Docker services...');
   runCompose(['up', '-d', '--build']);
 
-  const apiReady = await waitForService('Docker API', SERVICES.api.url, 120_000);
+  const apiReady = await waitForService(
+    'Docker API',
+    buildServiceHealthUrl('api', SERVICES.api.defaultPort),
+    120_000,
+  );
   const frontendReady = await waitForService(
     'Docker frontend',
-    SERVICES.frontend.url,
+    buildServiceHealthUrl('frontend', SERVICES.frontend.defaultPort),
     120_000,
   );
 
@@ -215,13 +224,22 @@ async function fullStatus() {
   await localStatus();
 }
 
-async function localUp() {
+async function localUp(args = []) {
+  const foreground = args.includes('--foreground');
+  const unknownArgs = args.filter((arg) => arg !== '--foreground');
+  if (unknownArgs.length > 0) {
+    throw new Error(`Unknown local up option(s): ${unknownArgs.join(', ')}. Use "dev local up --foreground".`);
+  }
+
   ensureStateDirectories();
 
   const state = readLocalState();
   if (state && (await localStackHealthy(state))) {
     console.log('Local services are already running.');
-    printSuccessEndpoints('Local');
+    printSuccessEndpoints('Local', getServicePortsFromState(state));
+    if (foreground) {
+      console.log('Foreground mode requires a fresh start. Run "dev local down" first.');
+    }
     return;
   }
 
@@ -230,11 +248,21 @@ async function localUp() {
     await localDown({ silent: true });
   }
 
-  await assertLocalPortsAvailable();
+  const localPorts = await resolveLocalPorts();
   runLocalBootstrap();
 
+  if (foreground) {
+    await localUpForeground(localPorts);
+    return;
+  }
+
+  await localUpDetached(localPorts);
+}
+
+async function localUpDetached(localPorts) {
   const nextState = {
     startedAt: new Date().toISOString(),
+    mode: 'detached',
     services: {},
   };
 
@@ -242,22 +270,16 @@ async function localUp() {
     const phpCmd = requireCommand('php', TOOL_CANDIDATES.php);
     const apiPid = startDetachedProcess({
       command: phpCmd,
-      args: ['-d', 'opcache.enable_cli=1', '-S', '127.0.0.1:8000', '-t', 'public'],
+      args: ['-d', 'opcache.enable_cli=1', '-S', `127.0.0.1:${localPorts.api}`, '-t', 'public'],
       cwd: PATHS.apiDir,
       logFile: SERVICES.api.logFile,
       label: 'api',
     });
 
-    nextState.services.api = {
-      pid: apiPid,
-      logFile: toRepoRelative(SERVICES.api.logFile),
-      url: SERVICES.api.url,
-      port: SERVICES.api.port,
-      startedAt: new Date().toISOString(),
-    };
+    nextState.services.api = buildServiceState('api', apiPid, localPorts.api);
     writeLocalState(nextState);
 
-    const apiReady = await waitForService('Local API', SERVICES.api.url, 120_000, {
+    const apiReady = await waitForService('Local API', buildServiceHealthUrl('api', localPorts.api), 120_000, {
       expectPid: apiPid,
     });
     if (!apiReady) {
@@ -269,24 +291,21 @@ async function localUp() {
     const npmCmd = requireCommand('npm', TOOL_CANDIDATES.npm);
     const frontendPid = startDetachedProcess({
       command: npmCmd,
-      args: ['run', 'dev', '--', '--host', '127.0.0.1', '--port', '5173'],
+      args: ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(localPorts.frontend)],
       cwd: PATHS.frontendDir,
       logFile: SERVICES.frontend.logFile,
       label: 'frontend',
+      extraEnv: {
+        VITE_API_PROXY_TARGET: buildServiceBaseUrl(localPorts.api),
+      },
     });
 
-    nextState.services.frontend = {
-      pid: frontendPid,
-      logFile: toRepoRelative(SERVICES.frontend.logFile),
-      url: SERVICES.frontend.url,
-      port: SERVICES.frontend.port,
-      startedAt: new Date().toISOString(),
-    };
+    nextState.services.frontend = buildServiceState('frontend', frontendPid, localPorts.frontend);
     writeLocalState(nextState);
 
     const frontendReady = await waitForService(
       'Local frontend',
-      SERVICES.frontend.url,
+      buildServiceHealthUrl('frontend', localPorts.frontend),
       120_000,
       {
         expectPid: frontendPid,
@@ -298,7 +317,7 @@ async function localUp() {
       );
     }
 
-    printSuccessEndpoints('Local');
+    printSuccessEndpoints('Local', localPorts);
     console.log(`Logs: ${toRepoRelative(SERVICES.api.logFile)}, ${toRepoRelative(SERVICES.frontend.logFile)}`);
   } catch (error) {
     await localDown({ silent: true });
@@ -306,11 +325,102 @@ async function localUp() {
   }
 }
 
+async function localUpForeground(localPorts) {
+  const nextState = {
+    startedAt: new Date().toISOString(),
+    mode: 'foreground',
+    services: {},
+  };
+
+  let apiChild = null;
+  let frontendChild = null;
+
+  try {
+    const phpCmd = requireCommand('php', TOOL_CANDIDATES.php);
+    apiChild = startAttachedProcess({
+      command: phpCmd,
+      args: ['-d', 'opcache.enable_cli=1', '-S', `127.0.0.1:${localPorts.api}`, '-t', 'public'],
+      cwd: PATHS.apiDir,
+      label: 'api',
+    });
+    nextState.services.api = buildServiceState('api', apiChild.pid, localPorts.api);
+    writeLocalState(nextState);
+
+    const apiReady = await waitForService('Local API', buildServiceHealthUrl('api', localPorts.api), 120_000, {
+      expectPid: apiChild.pid,
+    });
+    if (!apiReady) {
+      throw new Error('Local API did not become ready in foreground mode.');
+    }
+
+    const npmCmd = requireCommand('npm', TOOL_CANDIDATES.npm);
+    frontendChild = startAttachedProcess({
+      command: npmCmd,
+      args: ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(localPorts.frontend)],
+      cwd: PATHS.frontendDir,
+      label: 'frontend',
+      extraEnv: {
+        VITE_API_PROXY_TARGET: buildServiceBaseUrl(localPorts.api),
+      },
+    });
+    nextState.services.frontend = buildServiceState('frontend', frontendChild.pid, localPorts.frontend);
+    writeLocalState(nextState);
+
+    const frontendReady = await waitForService('Local frontend', buildServiceHealthUrl('frontend', localPorts.frontend), 120_000, {
+      expectPid: frontendChild.pid,
+    });
+    if (!frontendReady) {
+      throw new Error('Local frontend did not become ready in foreground mode.');
+    }
+
+    printSuccessEndpoints('Local', localPorts);
+    console.log('Foreground mode active. Press Ctrl+C to stop API + frontend.');
+
+    await waitForForegroundShutdown([
+      { name: 'frontend', child: frontendChild },
+      { name: 'api', child: apiChild },
+    ]);
+  } catch (error) {
+    await stopChildProcesses([frontendChild, apiChild]);
+    removeFileIfExists(PATHS.stateFile);
+    throw error;
+  }
+}
+
+function buildServiceState(serviceName, pid, port) {
+  const service = SERVICES[serviceName];
+  return {
+    pid,
+    logFile: toRepoRelative(service.logFile),
+    url: buildServiceHealthUrl(serviceName, port),
+    port,
+    startedAt: new Date().toISOString(),
+  };
+}
+
 async function localDown(options = {}) {
-  const { silent = false } = options;
+  const { silent = false, args = [] } = options;
+  const orphanCleanup = args.includes('--orphans');
+  const unknownArgs = args.filter((arg) => arg !== '--orphans');
+  if (unknownArgs.length > 0) {
+    throw new Error(`Unknown local down option(s): ${unknownArgs.join(', ')}. Use "dev local down --orphans".`);
+  }
+
   const state = readLocalState();
 
   if (!state) {
+    if (orphanCleanup) {
+      const orphanStopped = await stopOrphanLocalProcesses({ silent });
+      if (!silent) {
+        if (orphanStopped > 0) {
+          console.log(`Stopped ${orphanStopped} orphan local service process(es).`);
+        } else {
+          console.log('No managed local services are running and no local orphan process was found.');
+        }
+      }
+      return;
+    }
+
     if (!silent) {
       console.log('No managed local services are running.');
     }
@@ -327,13 +437,24 @@ async function localDown(options = {}) {
     if (!silent) {
       console.log(`Stopping ${serviceName} (pid ${service.pid})...`);
     }
-    await killProcessTree(service.pid);
+    const stopped = await killProcessTree(service.pid);
+    if (!stopped && !silent) {
+      console.log(`Warning: could not stop ${serviceName} (pid ${service.pid}). Check permissions and close it manually.`);
+    }
   }
 
   removeFileIfExists(PATHS.stateFile);
 
+  let orphanStopped = 0;
+  if (orphanCleanup) {
+    orphanStopped = await stopOrphanLocalProcesses({ silent });
+  }
+
   if (!silent) {
     console.log('Local services are stopped.');
+    if (orphanStopped > 0) {
+      console.log(`Also stopped ${orphanStopped} orphan process(es).`);
+    }
   }
 }
 
@@ -371,10 +492,10 @@ async function localStatus() {
   console.log('------------');
 
   const state = readLocalState();
+  const serviceNames = ['api', 'frontend'];
   if (!state) {
     console.log('Managed local services: not running');
   } else {
-    const serviceNames = ['api', 'frontend'];
     for (const serviceName of serviceNames) {
       const serviceState = state.services?.[serviceName];
       if (!serviceState) {
@@ -382,30 +503,116 @@ async function localStatus() {
         continue;
       }
 
+      const servicePort = serviceState.port ?? SERVICES[serviceName].defaultPort;
+      const healthUrl = serviceState.url ?? buildServiceHealthUrl(serviceName, servicePort);
       const pidRunning = isPidRunning(serviceState.pid);
-      const healthy = await isHttpHealthy(SERVICES[serviceName].url);
+      const healthy = await isHttpHealthy(healthUrl);
       const statusText = pidRunning && healthy ? 'running' : pidRunning ? 'degraded' : 'stopped';
       console.log(
-        `${serviceName}: ${statusText} (pid=${serviceState.pid}, url=${SERVICES[serviceName].url}, log=${serviceState.logFile})`,
+        `${serviceName}: ${statusText} (pid=${serviceState.pid}, url=${healthUrl}, log=${serviceState.logFile})`,
       );
     }
   }
 
-  const apiPortBusy = await isPortInUse(SERVICES.api.port);
-  const frontendPortBusy = await isPortInUse(SERVICES.frontend.port);
-  console.log(`Port ${SERVICES.api.port}: ${apiPortBusy ? 'busy' : 'free'}`);
-  console.log(`Port ${SERVICES.frontend.port}: ${frontendPortBusy ? 'busy' : 'free'}`);
+  for (const serviceName of serviceNames) {
+    const servicePort = getServicePort(serviceName, state);
+    const portBusy = await isPortInUse(servicePort);
+    console.log(`Port ${servicePort}: ${portBusy ? 'busy' : 'free'} (${serviceName})`);
+  }
 }
 
-async function localReset(args) {
-  if (!args.includes('--yes')) {
+async function resetCommand(args, options = {}) {
+  const { defaultScope = 'local', allowScopeOverride = true } = options;
+  const { scope, confirmed } = parseResetArgs(args, { defaultScope, allowScopeOverride });
+
+  if (!confirmed) {
     console.log('Refusing to reset without confirmation.');
-    console.log('Run "dev reset --yes" or "dev local reset --yes".');
+    if (allowScopeOverride) {
+      console.log('Run one of the following commands:');
+      console.log('- dev reset local --yes');
+      console.log('- dev reset docker --yes');
+      console.log('- dev reset all --yes');
+      return;
+    }
+    console.log('Run "dev local reset --yes".');
     return;
   }
 
-  await localDown({ silent: true });
+  if (scope === 'docker') {
+    await resetDockerScope();
+    return;
+  }
 
+  if (scope === 'all') {
+    await resetAllScopes();
+    return;
+  }
+
+  await resetLocalScope();
+}
+
+function parseResetArgs(args, options = {}) {
+  const { defaultScope = 'local', allowScopeOverride = true } = options;
+  let scope = defaultScope;
+  let confirmed = false;
+  const validScopes = ['local', 'docker', 'all'];
+  const unknownArgs = [];
+
+  for (const arg of args) {
+    if (arg === '--yes') {
+      confirmed = true;
+      continue;
+    }
+
+    if (validScopes.includes(arg)) {
+      if (!allowScopeOverride && arg !== defaultScope) {
+        throw new Error(`Scope "${arg}" is not supported for this command. Use "${defaultScope}".`);
+      }
+      scope = arg;
+      continue;
+    }
+
+    unknownArgs.push(arg);
+  }
+
+  if (unknownArgs.length > 0) {
+    throw new Error(`Unknown reset option(s): ${unknownArgs.join(', ')}`);
+  }
+
+  return { scope, confirmed };
+}
+
+async function resetLocalScope() {
+  await localDown({ silent: true });
+  const removed = removeLocalArtifacts();
+  printResetSummary('Local', removed);
+}
+
+async function resetDockerScope() {
+  await dockerDown();
+  console.log('Docker reset completed.');
+}
+
+async function resetAllScopes() {
+  let dockerError = null;
+  try {
+    await dockerDown();
+  } catch (error) {
+    dockerError = error;
+  }
+
+  await localDown({ silent: true });
+  const removed = removeLocalArtifacts();
+  printResetSummary('Local', removed);
+
+  if (dockerError) {
+    throw new Error(`Docker reset failed while local reset succeeded: ${dockerError.message}`);
+  }
+
+  console.log('Docker reset completed.');
+}
+
+function removeLocalArtifacts() {
   const targets = [
     PATHS.dbFile,
     path.join(PATHS.apiDir, 'var', 'cache'),
@@ -420,14 +627,17 @@ async function localReset(args) {
     fs.rmSync(target, { recursive: true, force: true });
     removed.push(toRepoRelative(target));
   }
+  return removed;
+}
 
-  if (removed.length === 0) {
-    console.log('Nothing to reset.');
+function printResetSummary(scopeLabel, removedPaths) {
+  if (removedPaths.length === 0) {
+    console.log(`Nothing to reset for ${scopeLabel.toLowerCase()} scope.`);
     return;
   }
 
-  console.log('Removed local state:');
-  for (const item of removed) {
+  console.log(`Removed ${scopeLabel.toLowerCase()} state:`);
+  for (const item of removedPaths) {
     console.log(`- ${item}`);
   }
 }
@@ -465,61 +675,85 @@ async function doctor() {
   ];
 
   for (const check of checks) {
-    const command = findCommand(check.candidates);
-    if (!command) {
+    const resolved = resolveCommandDetails(check.candidates);
+    if (!resolved) {
       console.log(`[MISSING] ${check.label}`);
       continue;
     }
 
-    const output = captureCommand(command, check.versionArgs);
-    const canRunVersion = commandWorks(command, check.versionArgs);
+    const output = captureCommand(resolved.command, check.versionArgs);
+    const canRunVersion = commandWorks(resolved.command, check.versionArgs);
     if (!canRunVersion) {
       console.log(
-        `[WARN] ${check.label}: found "${command}" but failed to execute ${check.versionArgs.join(' ')}`,
+        `[WARN] ${check.label}: found "${resolved.command}" (${resolved.path}) but failed to execute ${check.versionArgs.join(' ')}`,
       );
       continue;
     }
 
     const versionLine = firstLine(output) ?? 'available';
-    console.log(`[OK] ${check.label}: ${versionLine}`);
+    console.log(`[OK] ${check.label}: ${versionLine} (${resolved.path})`);
   }
 
   const composeRunner = resolveComposeRunner();
   if (!composeRunner) {
     console.log('[MISSING] docker compose plugin (or docker-compose)');
   } else {
-    console.log(`[OK] docker compose: ${formatCommand(composeRunner.command, composeRunner.prefix)}`);
+    const composePath = resolveCommandPath(composeRunner.command) ?? composeRunner.command;
+    console.log(`[OK] docker compose: ${formatCommand(composeRunner.command, composeRunner.prefix)} (${composePath})`);
   }
 
-  const apiPortBusy = await isPortInUse(SERVICES.api.port);
-  const frontendPortBusy = await isPortInUse(SERVICES.frontend.port);
-  console.log(`Port ${SERVICES.api.port}: ${apiPortBusy ? 'busy' : 'free'}`);
-  console.log(`Port ${SERVICES.frontend.port}: ${frontendPortBusy ? 'busy' : 'free'}`);
+  const apiPortBusy = await isPortInUse(SERVICES.api.defaultPort);
+  const frontendPortBusy = await isPortInUse(SERVICES.frontend.defaultPort);
+  console.log(`Port ${SERVICES.api.defaultPort}: ${apiPortBusy ? 'busy' : 'free'}`);
+  console.log(`Port ${SERVICES.frontend.defaultPort}: ${frontendPortBusy ? 'busy' : 'free'}`);
 
   ensureStateDirectories();
   console.log(`[OK] writable state dir: ${toRepoRelative(PATHS.stateDir)}`);
+  console.log(`[INFO] shell: ${process.env.SHELL ?? process.env.ComSpec ?? 'unknown'}`);
+  console.log(`[INFO] terminal: ${process.env.TERM_PROGRAM ?? process.env.WT_SESSION ?? 'unknown'}`);
 }
 
 function runLocalBootstrap() {
   const phpCmd = requireCommand('php', TOOL_CANDIDATES.php);
   const composerCmd = requireCommand('composer', TOOL_CANDIDATES.composer);
   const npmCmd = requireCommand('npm', TOOL_CANDIDATES.npm);
+  const bootstrapState = readBootstrapState();
+
+  const apiInstallHash = computeCombinedHash([
+    path.join(PATHS.apiDir, 'composer.lock'),
+    path.join(PATHS.apiDir, 'composer.json'),
+  ]);
+  const frontendInstallHash = computeCombinedHash([
+    path.join(PATHS.frontendDir, 'package-lock.json'),
+    path.join(PATHS.frontendDir, 'package.json'),
+  ]);
 
   const apiAutoload = path.join(PATHS.apiDir, 'vendor', 'autoload.php');
-  if (!fs.existsSync(apiAutoload)) {
-    console.log('Installing API dependencies (composer install)...');
+  const shouldInstallApi = !fs.existsSync(apiAutoload) || bootstrapState.apiInstallHash !== apiInstallHash;
+  if (shouldInstallApi) {
+    const reason = fs.existsSync(apiAutoload) ? 'lockfile changed' : 'vendor missing';
+    console.log(`Installing API dependencies (composer install, ${reason})...`);
     runCommand(composerCmd, ['install', '--no-interaction', '--prefer-dist'], {
       cwd: PATHS.apiDir,
     });
   }
 
   const frontendNodeModules = path.join(PATHS.frontendDir, 'node_modules');
-  if (!fs.existsSync(frontendNodeModules)) {
-    console.log('Installing frontend dependencies (npm install)...');
+  const shouldInstallFrontend = !fs.existsSync(frontendNodeModules)
+    || bootstrapState.frontendInstallHash !== frontendInstallHash;
+  if (shouldInstallFrontend) {
+    const reason = fs.existsSync(frontendNodeModules) ? 'lockfile changed' : 'node_modules missing';
+    console.log(`Installing frontend dependencies (npm install, ${reason})...`);
     runCommand(npmCmd, ['install'], {
       cwd: PATHS.frontendDir,
     });
   }
+
+  writeBootstrapState({
+    apiInstallHash,
+    frontendInstallHash,
+    updatedAt: new Date().toISOString(),
+  });
 
   fs.mkdirSync(path.dirname(PATHS.dbFile), { recursive: true });
 
@@ -546,16 +780,43 @@ function runLocalBootstrap() {
   );
 }
 
-async function assertLocalPortsAvailable() {
-  for (const [serviceName, service] of Object.entries(SERVICES)) {
-    const inUse = await isPortInUse(service.port);
-    if (!inUse) {
+async function resolveLocalPorts() {
+  const reserved = new Set();
+  const ports = {};
+
+  for (const serviceName of ['api', 'frontend']) {
+    const preferredPort = SERVICES[serviceName].defaultPort;
+    const selectedPort = await findFirstFreePort(preferredPort, reserved, 100);
+    if (!selectedPort) {
+      throw new Error(`No free port found for ${serviceName} near ${preferredPort}.`);
+    }
+
+    if (selectedPort !== preferredPort) {
+      const pid = findPidListeningOnLocalhost(preferredPort);
+      const pidHint = pid ? ` (pid ${pid})` : '';
+      console.log(
+        `Port ${preferredPort} is already in use for ${serviceName}${pidHint}. Using ${selectedPort} instead.`,
+      );
+    }
+
+    ports[serviceName] = selectedPort;
+    reserved.add(selectedPort);
+  }
+
+  return ports;
+}
+
+async function findFirstFreePort(startPort, reservedPorts = new Set(), maxAttempts = 100) {
+  for (let port = startPort; port < startPort + maxAttempts; port += 1) {
+    if (reservedPorts.has(port)) {
       continue;
     }
-    throw new Error(
-      `Port ${service.port} is already in use (${serviceName}). Free it first or run "dev local down" if it is a stale local process.`,
-    );
+    const inUse = await isPortInUse(port);
+    if (!inUse) {
+      return port;
+    }
   }
+  return null;
 }
 
 function ensureComposeRunner() {
@@ -629,6 +890,42 @@ function readLocalState() {
   }
 }
 
+function readBootstrapState() {
+  if (!fs.existsSync(PATHS.bootstrapStateFile)) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(fs.readFileSync(PATHS.bootstrapStateFile, 'utf8'));
+  } catch (_error) {
+    return {};
+  }
+}
+
+function writeBootstrapState(state) {
+  ensureStateDirectories();
+  fs.writeFileSync(PATHS.bootstrapStateFile, `${JSON.stringify(state, null, 2)}${os.EOL}`, 'utf8');
+}
+
+function computeCombinedHash(filePaths) {
+  const hash = createHash('sha256');
+  let anyFile = false;
+
+  for (const filePath of filePaths) {
+    if (!fs.existsSync(filePath)) {
+      continue;
+    }
+    hash.update(fs.readFileSync(filePath));
+    anyFile = true;
+  }
+
+  if (!anyFile) {
+    return null;
+  }
+
+  return hash.digest('hex');
+}
+
 function writeLocalState(state) {
   ensureStateDirectories();
   fs.writeFileSync(PATHS.stateFile, `${JSON.stringify(state, null, 2)}${os.EOL}`, 'utf8');
@@ -651,9 +948,13 @@ async function localStackHealthy(state) {
     return false;
   }
 
+  const apiUrl = state?.services?.api?.url
+    ?? buildServiceHealthUrl('api', getServicePort('api', state));
+  const frontendUrl = state?.services?.frontend?.url
+    ?? buildServiceHealthUrl('frontend', getServicePort('frontend', state));
   const [apiHealthy, frontendHealthy] = await Promise.all([
-    isHttpHealthy(SERVICES.api.url),
-    isHttpHealthy(SERVICES.frontend.url),
+    isHttpHealthy(apiUrl),
+    isHttpHealthy(frontendUrl),
   ]);
   return apiHealthy && frontendHealthy;
 }
@@ -666,19 +967,26 @@ function isPidRunning(pid) {
   try {
     process.kill(pid, 0);
     return true;
-  } catch (_error) {
+  } catch (error) {
+    if (error?.code === 'EPERM' || error?.code === 'EACCES') {
+      // Process exists but current user cannot signal it.
+      return true;
+    }
     return false;
   }
 }
 
 async function killProcessTree(pid) {
   if (!pid) {
-    return;
+    return true;
   }
 
   if (WINDOWS) {
-    spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
-    return;
+    const result = spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
+    if (result.error) {
+      return false;
+    }
+    return !isPidRunning(pid);
   }
 
   try {
@@ -687,14 +995,14 @@ async function killProcessTree(pid) {
     try {
       process.kill(pid, 'SIGTERM');
     } catch (_ignored) {
-      return;
+      return !isPidRunning(pid);
     }
   }
 
   await sleep(500);
 
   if (!isPidRunning(pid)) {
-    return;
+    return true;
   }
 
   try {
@@ -706,6 +1014,8 @@ async function killProcessTree(pid) {
       // no-op
     }
   }
+
+  return !isPidRunning(pid);
 }
 
 async function isPortInUse(port) {
@@ -761,7 +1071,166 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function startDetachedProcess({ command, args, cwd, logFile, label }) {
+function startAttachedProcess({ command, args, cwd, label, extraEnv = {} }) {
+  const prepared = prepareSpawn(command, args);
+  console.log(`Starting ${label} in foreground: ${formatCommand(command, args)}`);
+
+  const child = spawn(prepared.command, prepared.args, {
+    cwd,
+    env: { ...process.env, ...extraEnv },
+    windowsHide: true,
+    stdio: 'inherit',
+  });
+
+  if (!child.pid) {
+    throw new Error(`Failed to start ${label} process.`);
+  }
+
+  return child;
+}
+
+async function waitForForegroundShutdown(children) {
+  await new Promise((resolve, reject) => {
+    let settled = false;
+
+    const onSigint = () => {
+      void cleanupAndResolve();
+    };
+    const onSigterm = () => {
+      void cleanupAndResolve();
+    };
+
+    const removeSignalHandlers = () => {
+      process.removeListener('SIGINT', onSigint);
+      process.removeListener('SIGTERM', onSigterm);
+    };
+
+    const cleanupAndResolve = async () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      removeSignalHandlers();
+      await stopChildProcesses(children.map((item) => item.child));
+      removeFileIfExists(PATHS.stateFile);
+      resolve();
+    };
+
+    const cleanupAndReject = async (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      removeSignalHandlers();
+      await stopChildProcesses(children.map((item) => item.child));
+      removeFileIfExists(PATHS.stateFile);
+      reject(error);
+    };
+
+    process.once('SIGINT', onSigint);
+    process.once('SIGTERM', onSigterm);
+
+    for (const item of children) {
+      item.child.once('exit', (code, signal) => {
+        if (settled) {
+          return;
+        }
+
+        if (code === 0 || signal === 'SIGINT' || signal === 'SIGTERM') {
+          void cleanupAndResolve();
+          return;
+        }
+
+        const reason = signal ? `signal=${signal}` : `code=${code}`;
+        void cleanupAndReject(new Error(`${item.name} exited unexpectedly (${reason}).`));
+      });
+    }
+  });
+}
+
+async function stopChildProcesses(children) {
+  for (const child of children) {
+    const pid = child?.pid;
+    if (!pid) {
+      continue;
+    }
+    await killProcessTree(pid);
+  }
+}
+
+async function stopOrphanLocalProcesses(options = {}) {
+  const { silent = false } = options;
+  let stopped = 0;
+
+  for (const serviceName of ['frontend', 'api']) {
+    const service = SERVICES[serviceName];
+    const pid = findPidListeningOnLocalhost(service.defaultPort);
+    if (!pid || !isPidRunning(pid)) {
+      continue;
+    }
+
+    if (!silent) {
+      console.log(`Stopping orphan ${serviceName} on 127.0.0.1:${service.defaultPort} (pid ${pid})...`);
+    }
+    const killed = await killProcessTree(pid);
+    if (killed) {
+      stopped += 1;
+    } else if (!silent) {
+      console.log(`Warning: unable to stop orphan ${serviceName} pid ${pid}. Try from an elevated terminal.`);
+    }
+  }
+
+  return stopped;
+}
+
+function findPidListeningOnLocalhost(port) {
+  if (WINDOWS) {
+    return findPidListeningOnLocalhostWindows(port);
+  }
+  return findPidListeningOnLocalhostUnix(port);
+}
+
+function findPidListeningOnLocalhostWindows(port) {
+  const result = spawnSync('netstat', ['-ano', '-p', 'tcp'], {
+    cwd: REPO_ROOT,
+    env: process.env,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  if (result.error || result.status !== 0) {
+    return null;
+  }
+
+  const pattern = new RegExp(
+    `^\\s*TCP\\s+(?:127\\.0\\.0\\.1|0\\.0\\.0\\.0|\\[::1\\]|\\[::\\]):${port}\\s+(?:0\\.0\\.0\\.0:0|\\[::\\]:0)\\s+\\S+\\s+(\\d+)\\s*$`,
+    'im',
+  );
+  const match = result.stdout.match(pattern);
+  if (!match) {
+    return null;
+  }
+
+  const pid = Number.parseInt(match[1], 10);
+  return Number.isFinite(pid) ? pid : null;
+}
+
+function findPidListeningOnLocalhostUnix(port) {
+  const lsof = findCommand(['lsof']);
+  if (!lsof) {
+    return null;
+  }
+
+  const output = captureCommand(lsof, ['-nP', `-iTCP@127.0.0.1:${port}`, '-sTCP:LISTEN', '-t']);
+  const candidate = firstLine(output);
+  if (!candidate) {
+    return null;
+  }
+
+  const pid = Number.parseInt(candidate, 10);
+  return Number.isFinite(pid) ? pid : null;
+}
+
+function startDetachedProcess({ command, args, cwd, logFile, label, extraEnv = {} }) {
   ensureStateDirectories();
   appendLog(
     logFile,
@@ -773,7 +1242,7 @@ function startDetachedProcess({ command, args, cwd, logFile, label }) {
 
   const child = spawn(prepared.command, prepared.args, {
     cwd,
-    env: process.env,
+    env: { ...process.env, ...extraEnv },
     detached: true,
     windowsHide: true,
     stdio: ['ignore', logFd, logFd],
@@ -910,10 +1379,82 @@ function findCommand(candidates) {
   return null;
 }
 
+function resolveCommandDetails(candidates) {
+  for (const candidate of candidates) {
+    const resolvedPath = resolveCommandPath(candidate);
+    if (resolvedPath) {
+      return { command: candidate, path: resolvedPath };
+    }
+  }
+  return null;
+}
+
 function commandExists(command) {
-  const checker = WINDOWS ? 'where' : 'which';
-  const result = spawnSync(checker, [command], { stdio: 'ignore' });
-  return !result.error && result.status === 0;
+  return resolveCommandPath(command) !== null;
+}
+
+function resolveCommandPath(command) {
+  if (!command) {
+    return null;
+  }
+
+  const commandHasPath = command.includes('/') || command.includes('\\');
+  if (commandHasPath || path.isAbsolute(command)) {
+    const absolutePath = path.isAbsolute(command) ? command : path.resolve(REPO_ROOT, command);
+    return isRegularFile(absolutePath) ? absolutePath : null;
+  }
+
+  const pathEntries = (process.env.PATH ?? '')
+    .split(path.delimiter)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  if (pathEntries.length === 0) {
+    return null;
+  }
+
+  const candidates = buildCommandCandidates(command);
+  for (const directory of pathEntries) {
+    for (const candidate of candidates) {
+      const fullPath = path.join(directory, candidate);
+      if (isRegularFile(fullPath)) {
+        return fullPath;
+      }
+    }
+  }
+
+  return null;
+}
+
+function buildCommandCandidates(command) {
+  if (!WINDOWS) {
+    return [command];
+  }
+
+  if (path.extname(command)) {
+    return [command];
+  }
+
+  const pathExt = (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
+    .split(';')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+  const candidates = [command];
+  for (const ext of pathExt) {
+    candidates.push(`${command}${ext.toLowerCase()}`);
+    candidates.push(`${command}${ext.toUpperCase()}`);
+  }
+
+  return candidates;
+}
+
+function isRegularFile(filePath) {
+  try {
+    const stats = fs.statSync(filePath);
+    return stats.isFile();
+  } catch (_error) {
+    return false;
+  }
 }
 
 function requireCommand(label, candidates) {
@@ -961,10 +1502,30 @@ function toRepoRelative(filePath) {
   return path.relative(REPO_ROOT, filePath).replaceAll('\\', '/');
 }
 
-function printSuccessEndpoints(modeLabel) {
+function getServicePort(serviceName, state = null) {
+  return state?.services?.[serviceName]?.port ?? SERVICES[serviceName].defaultPort;
+}
+
+function getServicePortsFromState(state = null) {
+  return {
+    api: getServicePort('api', state),
+    frontend: getServicePort('frontend', state),
+  };
+}
+
+function buildServiceBaseUrl(port) {
+  return `http://127.0.0.1:${port}`;
+}
+
+function buildServiceHealthUrl(serviceName, port) {
+  return `${buildServiceBaseUrl(port)}${SERVICES[serviceName].healthPath}`;
+}
+
+function printSuccessEndpoints(modeLabel, servicePorts = null) {
+  const ports = servicePorts ?? getServicePortsFromState(null);
   console.log(`${modeLabel} services are ready:`);
-  console.log(`- API: ${SERVICES.api.url.replace('/api/equipment', '')}`);
-  console.log(`- Frontend: ${SERVICES.frontend.url}`);
+  console.log(`- API: ${buildServiceBaseUrl(ports.api)}`);
+  console.log(`- Frontend: ${buildServiceBaseUrl(ports.frontend)}`);
 }
 
 function formatCommand(command, args) {

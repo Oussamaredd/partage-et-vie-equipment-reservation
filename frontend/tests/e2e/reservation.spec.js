@@ -36,7 +36,7 @@ test('signup -> login -> reservation happy path', async ({ page }) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ token: 'jwt-token', email: 'new.user@company.test' }),
+      body: JSON.stringify({ token: 'header.eyJleHAiOjQxMDAwMDAwMDB9.signature', email: 'new.user@company.test' }),
     })
   })
 
@@ -75,24 +75,80 @@ test('forgot/reset password flow', async ({ page }) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ message: 'If your account exists, a password reset link has been generated.', resetToken: 'reset-token-123' }),
-    })
-  })
-
-  await page.route('**/api/auth/reset-password', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
       body: JSON.stringify({ message: 'Password reset successfully.' }),
     })
   })
 
   await auth.gotoForgotPassword()
-  await auth.requestReset('new.user@company.test')
-  await expect(page.getByTestId('forgot-generated-token')).toContainText('reset-token-123')
-
-  await auth.resetPassword({ token: 'reset-token-123', newPassword: 'NewPassword123' })
+  await auth.resetPasswordByEmail({ email: 'new.user@company.test', newPassword: 'NewPassword123' })
   await expect(page.getByTestId('forgot-feedback')).toContainText('Password reset successfully.')
+})
+
+test('authenticated user can delete a reservation from the list page', async ({ page }) => {
+  const auth = new AuthPage(page)
+  const reservations = new ReservationsPage(page)
+  let reservationsState = [
+    {
+      id: 7,
+      email: 'employee@company.test',
+      startDate: '2026-03-20T09:00:00+00:00',
+      endDate: '2026-03-20T18:00:00+00:00',
+      equipment: { id: 1, name: 'Dell Latitude 7440', reference: 'EQ-LAP-001' },
+    },
+  ]
+
+  await page.route('**/api/auth/login', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ token: 'header.eyJleHAiOjQxMDAwMDAwMDB9.signature', email: 'employee@company.test' }),
+    })
+  })
+
+  await page.route('**/api/reservations**', async (route) => {
+    const method = route.request().method()
+
+    if (method === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(reservationsState),
+      })
+
+      return
+    }
+
+    if (method === 'DELETE') {
+      const segments = route.request().url().split('/')
+      const reservationId = Number(segments[segments.length - 1])
+      reservationsState = reservationsState.filter((item) => item.id !== reservationId)
+
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ message: 'Reservation deleted successfully.' }),
+      })
+
+      return
+    }
+
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ id: 8, message: 'Reservation created successfully.' }),
+    })
+  })
+
+  await auth.gotoLogin()
+  await auth.login({ email: 'employee@company.test', password: 'ChangeMe123' })
+  await reservations.gotoList()
+  await expect(page).toHaveURL(/\/reservations$/)
+  await expect(page.getByTestId('reservation-delete-top-right')).toBeVisible()
+
+  await reservations.clickPanelDelete()
+
+  await expect(page.getByTestId('reservation-delete-feedback')).toContainText('Reservation deleted successfully.')
+  await expect(page.getByText('No reservations found. Create one to get started.')).toBeVisible()
 })
 
 test('authenticated reservation error flows', async ({ page }) => {
@@ -103,7 +159,7 @@ test('authenticated reservation error flows', async ({ page }) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ token: 'jwt-token', email: 'employee@company.test' }),
+      body: JSON.stringify({ token: 'header.eyJleHAiOjQxMDAwMDAwMDB9.signature', email: 'employee@company.test' }),
     })
   })
 

@@ -5,9 +5,42 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - if: matrix.target == 'backend'
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+      - if: matrix.target == 'backend'
+        uses: ramsey/composer-install@v3
+        with:
+          working-directory: api
+      - if: matrix.target == 'frontend'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: bash infra/ci/${{ matrix.target }}-lint.sh
+
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Prepare backend env files for CI
@@ -25,6 +58,7 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -36,7 +70,8 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
-    needs: [backend, frontend]
+    timeout-minutes: 25
+    needs: [lint, backend, frontend]
     steps:
       - uses: actions/checkout@v4
       - name: Prepare backend env files for CI
@@ -48,6 +83,11 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('frontend/package-lock.json') }}
       - run: bash infra/ci/e2e-tests.sh
       - if: always()
         run: node infra/scripts/dev.mjs down

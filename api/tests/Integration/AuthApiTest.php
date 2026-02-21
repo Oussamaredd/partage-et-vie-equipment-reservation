@@ -121,6 +121,34 @@ class AuthApiTest extends WebTestCase
         self::assertResponseStatusCodeSame(Response::HTTP_OK);
     }
 
+    public function testForgotPasswordCanDirectlyResetByEmail(): void
+    {
+        $client = static::createClient();
+        $this->signupUser($client, 'direct.reset@company.test', 'Password123');
+
+        $client->request(
+            'POST',
+            '/api/auth/forgot-password',
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode([
+                'email' => 'direct.reset@company.test',
+                'newPassword' => 'NewPassword123',
+            ], JSON_THROW_ON_ERROR)
+        );
+        self::assertResponseStatusCodeSame(Response::HTTP_OK);
+
+        $client->request(
+            'POST',
+            '/api/auth/login',
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode([
+                'email' => 'direct.reset@company.test',
+                'password' => 'NewPassword123',
+            ], JSON_THROW_ON_ERROR)
+        );
+        self::assertResponseStatusCodeSame(Response::HTTP_OK);
+    }
+
     private function signupUser(KernelBrowser $client, string $email, string $password): void
     {
         $client->request(

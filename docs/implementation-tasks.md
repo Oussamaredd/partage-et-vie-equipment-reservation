@@ -72,7 +72,7 @@ This task list is derived from `docs/implementation-plan.md` and ordered for exe
 ## 7) Vue Frontend (Async Reservation Flow)
 - [x] Create reservation page UI:
   - Equipment selector
-  - User email input
+  - Authenticated user context from JWT (no email input in form)
   - Start/end date inputs
   - Submit action
 - [x] Integrate API calls with `fetch` (no page reload).
@@ -115,7 +115,7 @@ This task list is derived from `docs/implementation-plan.md` and ordered for exe
 
 ## 12) Dockerization
 - [x] Finalize Dockerfiles for API and frontend.
-- [x] Finalize `infra/docker/docker-compose.yml` for local orchestration.
+- [x] Finalize root `docker-compose.yml` for local orchestration.
 - [x] Mount volume for persistent SQLite file.
 - [x] Verify local run of API + UI + tests in containers.
 
@@ -164,7 +164,7 @@ This task list is derived from `docs/implementation-plan.md` and ordered for exe
 - [x] Add HTTP controllers/endpoints:
   - [x] `POST /api/auth/signup`
   - [x] `POST /api/auth/login`
-  - [x] `POST /api/auth/forgot-password`
+  - [x] `POST /api/auth/forgot-password` (request token + local demo shortcut `email + newPassword`)
   - [x] `POST /api/auth/reset-password`
 - [x] Add middleware/guard for protected routes (`/api/reservations*`).
 - [x] Ensure controllers remain thin and errors map to correct status codes.
@@ -201,8 +201,12 @@ This task list is derived from `docs/implementation-plan.md` and ordered for exe
   - [x] protected reservation endpoints reject missing/invalid token
 - [x] Frontend unit tests:
   - [x] router guard redirects
-  - [x] login/signup/forgot page behavior
+  - [x] login form behavior
   - [x] token persistence and logout
+- [x] Frontend component tests:
+  - [x] login form UI interactions
+  - [x] reservation form validation/submission payload
+  - [x] reservation list render states
 - [x] Playwright E2E:
   - [x] unauthenticated redirect to login
   - [x] signup -> login -> reservation happy path

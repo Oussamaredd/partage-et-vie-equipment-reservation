@@ -27,14 +27,9 @@ export class AuthPage {
     await this.page.getByTestId('login-submit').click()
   }
 
-  async requestReset(email) {
+  async resetPasswordByEmail({ email, newPassword }) {
     await this.page.getByTestId('forgot-email').fill(email)
+    await this.page.getByTestId('forgot-new-password').fill(newPassword)
     await this.page.getByTestId('forgot-submit').click()
-  }
-
-  async resetPassword({ token, newPassword }) {
-    await this.page.getByTestId('reset-token').fill(token)
-    await this.page.getByTestId('reset-new-password').fill(newPassword)
-    await this.page.getByTestId('reset-submit').click()
   }
 }

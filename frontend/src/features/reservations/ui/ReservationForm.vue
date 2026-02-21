@@ -1,5 +1,5 @@
 <script setup>
-import { reactive, watch } from 'vue'
+import { computed, reactive, watch } from 'vue'
 
 const props = defineProps({
   equipment: { type: Array, default: () => [] },
@@ -13,6 +13,10 @@ const form = reactive({
   equipmentId: '',
   startDate: '',
   endDate: '',
+})
+
+const canSubmit = computed(() => {
+  return !props.loadingEquipment && !props.loadingSubmit && form.equipmentId !== ''
 })
 
 watch(
@@ -39,6 +43,7 @@ function onSubmit() {
     <label>
       Equipment
       <select v-model="form.equipmentId" data-testid="reservation-equipment" :disabled="props.loadingEquipment">
+        <option v-if="props.equipment.length === 0" value="" disabled>No equipment available</option>
         <option v-for="item in props.equipment" :key="item.id" :value="String(item.id)">
           {{ item.name }} ({{ item.reference }})
         </option>
@@ -55,7 +60,7 @@ function onSubmit() {
       <input v-model="form.endDate" data-testid="reservation-end-date" type="datetime-local" required />
     </label>
 
-    <button data-testid="reservation-submit" :disabled="props.loadingSubmit" type="submit">
+    <button data-testid="reservation-submit" :disabled="!canSubmit" type="submit">
       {{ props.loadingSubmit ? 'Submitting...' : 'Reserve equipment' }}
     </button>
   </form>

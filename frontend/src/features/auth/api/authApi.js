@@ -24,10 +24,9 @@ export function requestPasswordReset(payload) {
   })
 }
 
-export function resetPassword(payload) {
-  return apiRequest('/api/auth/reset-password', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: payload,
+export async function resetPasswordByEmail(payload) {
+  return requestPasswordReset({
+    email: payload.email,
+    newPassword: payload.newPassword,
   })
 }

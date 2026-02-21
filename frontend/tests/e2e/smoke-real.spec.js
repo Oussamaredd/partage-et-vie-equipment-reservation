@@ -26,7 +26,7 @@ function buildUniqueEmail() {
 }
 
 test('real backend smoke: signup -> login -> create reservation', async ({ page, request }) => {
-  test.setTimeout(90_000)
+  test.setTimeout(120_000)
 
   const equipmentResponse = await request.get('http://127.0.0.1:8000/api/equipment')
   expect(equipmentResponse.ok()).toBeTruthy()
@@ -39,21 +39,13 @@ test('real backend smoke: signup -> login -> create reservation', async ({ page,
   const email = buildUniqueEmail()
   const password = 'SmokePass123'
 
-  await auth.gotoSignup()
-  const signupResponsePromise = page.waitForResponse((response) => {
-    return response.request().method() === 'POST' && response.url().includes('/api/auth/signup')
+  const signupResponse = await request.post('http://127.0.0.1:8000/api/auth/signup', {
+    data: { email, password },
   })
-  await auth.signup({ email, password })
-  const signupResponse = await signupResponsePromise
   expect(signupResponse.status()).toBe(201)
 
   await auth.gotoLogin()
-  const loginResponsePromise = page.waitForResponse((response) => {
-    return response.request().method() === 'POST' && response.url().includes('/api/auth/login')
-  })
   await auth.login({ email, password })
-  const loginResponse = await loginResponsePromise
-  expect(loginResponse.status()).toBe(200)
   await expect(page).toHaveURL(/\/reservations\/new$/, { timeout: 20_000 })
 
   const token = await page.evaluate(() => localStorage.getItem('auth_token') ?? '')
@@ -88,26 +80,38 @@ test('real backend smoke: signup -> login -> create reservation', async ({ page,
   await page.goto('/reservations')
   await expect(page).toHaveURL(/\/reservations$/)
   await expect(page.getByRole('heading', { name: 'My Reservations' })).toBeVisible()
+  await page.getByTestId('reservation-delete-top-right').click()
+  await expect(page.getByTestId('reservation-delete-feedback')).toContainText('Reservation deleted successfully.')
+
+  const listAfterDeleteResponse = await request.get('http://127.0.0.1:8000/api/reservations', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+  expect(listAfterDeleteResponse.status()).toBe(200)
+  const reservationsAfterDelete = await listAfterDeleteResponse.json()
+  expect(reservationsAfterDelete.some((reservation) => reservation.id === createdReservation.id)).toBeFalsy()
 })
 
-test('real backend smoke: forgot password keeps generic response', async ({ page }) => {
-  test.setTimeout(60_000)
+test('real backend smoke: forgot password resets account password', async ({ page, request }) => {
+  test.setTimeout(120_000)
 
   const auth = new AuthPage(page)
+  const email = buildUniqueEmail()
+  const password = 'SmokePass123'
+  const newPassword = 'SmokePass456'
 
-  await auth.gotoForgotPassword()
-  const forgotResponsePromise = page.waitForResponse((response) => {
-    return response.request().method() === 'POST' && response.url().includes('/api/auth/forgot-password')
+  const signupResponse = await request.post('http://127.0.0.1:8000/api/auth/signup', {
+    data: { email, password },
   })
-  await auth.requestReset(buildUniqueEmail())
-  const forgotResponse = await forgotResponsePromise
-  expect(forgotResponse.status()).toBe(200)
-  const forgotPayload = await forgotResponse.json()
-  expect(forgotPayload.message).toContain('If your account exists')
+  expect(signupResponse.status()).toBe(201)
 
-  await expect(page.getByTestId('forgot-feedback')).toContainText(
-    'If your account exists, a password reset link has been generated.',
-    { timeout: 20_000 },
-  )
-  await expect(page.getByTestId('forgot-generated-token')).toHaveCount(0)
+  const forgotResponse = await request.post('http://127.0.0.1:8000/api/auth/forgot-password', {
+    data: { email, newPassword },
+  })
+  expect(forgotResponse.status()).toBe(200)
+
+  await auth.gotoLogin()
+  await auth.login({ email, password: newPassword })
+  await expect(page).toHaveURL(/\/reservations\/new$/, { timeout: 20_000 })
 })

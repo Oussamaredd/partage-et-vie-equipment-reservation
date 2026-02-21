@@ -9,6 +9,8 @@ interface ReservationRepositoryInterface
 {
     public function save(Reservation $reservation): void;
 
+    public function deleteByIdAndUserEmail(int $reservationId, string $userEmail): bool;
+
     public function hasOverlap(Equipment $equipment, DateTimeImmutable $startDate, DateTimeImmutable $endDate): bool;
 
     /**

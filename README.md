@@ -12,30 +12,38 @@ Voici le guide pratique, de A a Z, pour utiliser le projet rapidement.
 
 | Commande | Usage |
 | --- | --- |
-| `npm run docker:up` | Commande recommandee pour commencer: demarre API + frontend en Docker et attend les health checks. |
+| `npm run docker:up` | Commande recommandee pour commencer: demarre API + frontend via `docker compose up -d --build`. |
 | `npm run docker:down` | Arrete proprement les services Docker a la fin de votre session. |
 | `npm run docker:logs` | Stream les logs Docker pour diagnostiquer les problemes de demarrage ou d'execution. |
 | `npm run docker:status` | Affiche l'etat des services/process et les verifications runtime utiles. |
 | `npm run docker:doctor` | Verifie les prerequis outillage et la disponibilite des ports avant lancement. |
-| `npm run docker:reset` | Nettoyage local destructif en mode Docker (reset DB/cache/process). |
-| `npm run local:up` | Demarre API + frontend en process locaux en arriere-plan avec suivi PID. |
+| `npm run docker:reset` | Reset scope Docker (`docker compose down`) avec confirmation. |
+| `npm run dev` | Demarre API + frontend en mode attache au terminal courant (Ctrl+C stoppe les deux), avec fallback automatique si 8000/5173 sont occupes. |
+| `npm run dev:foreground` | Alias explicite de `npm run dev` (mode attache au terminal). |
+| `npm run dev:detached` | Demarre API + frontend en arriere-plan avec suivi PID. |
+| `npm run local:up` | Alias de `npm run dev` (compatibilite). |
 | `npm run local:down` | Arrete les process demarres via `local:up`. |
 | `npm run local:logs` | Lit les logs locaux dans `.dev/logs` (API + frontend). |
 | `npm run local:status` | Affiche la sante du mode local, les PID actifs et les ports occupes. |
 | `npm run local:reset` | Nettoyage local destructif en mode natif. |
-| `npm run dev -- up` | Wrapper direct (usage avance) equivalent a Docker up. |
-| `npm run dev -- local up` | Wrapper direct (usage avance) equivalent a Local up. |
+| `npm run reset:all` | Reset scopes Docker + local avec confirmation (`--yes`). |
+| `npm run dev:ctl -- up` | Wrapper direct (usage avance) equivalent a Docker up. |
+| `npm run dev:ctl -- local up --foreground` | Wrapper direct (usage avance) equivalent a Local up attache au terminal. |
 | `cd api && php bin/phpunit` | Lance les tests backend avec PHPUnit. |
 | `cd frontend && npm run test:unit` | Lance les tests unitaires frontend avec Vitest. |
+| `cd frontend && npm run test:component` | Lance les tests component frontend avec Vitest. |
 | `cd frontend && npm run test:e2e` | Lance la suite Playwright E2E mockee (rapide). |
 | `cd frontend && npm run test:e2e:smoke` | Lance les checks E2E smoke contre le vrai backend. |
 | `cd frontend && npm run test:e2e:all` | Lance les suites E2E mockee + smoke backend reel. |
 
-Apres demarrage, ouvrez `http://localhost:5173` pour l'UI et utilisez `http://localhost:8000` pour l'API.
+Apres demarrage, utilisez les URLs affichees dans le terminal (par defaut `http://localhost:5173` pour l'UI et `http://localhost:8000` pour l'API).
 
 Comptes TEST dev:
 - Compte 1: `employee@company.test` / `ChangeMe123`
 - Compte 2: `employee2@company.test` / `ChangeMe123`
+
+Si les comptes fixture sont absents (DB locale deja modifiee), rechargez-les avec:
+`cd api && php bin/console doctrine:fixtures:load --no-interaction`
 
 ## Environment Setup (Nouveaux contributeurs)
 Pour un nouvel utilisateur GitHub/repo, suivez ces etapes avant le premier lancement.
@@ -121,9 +129,18 @@ npm run docker:down
 
 Mode local natif depuis la racine du repository:
 ```bash
-npm run local:up
+npm run dev
 npm run local:down
 ```
+
+Utilisation VS Code (terminal integre):
+- Ouvrez le terminal integre VS Code dans ce workspace.
+- Utilisez un profil `PowerShell` ou `Command Prompt` sur Windows.
+- Lancez `npm run dev` directement (pas besoin d'un terminal Node externe).
+- `npm run dev` est deja en mode attache (logs visibles dans le terminal courant).
+- Si `8000` ou `5173` est deja pris, le script choisit automatiquement un port local libre.
+- Utilisez `npm run dev:detached` si vous voulez garder la main dans le terminal.
+- Vous pouvez aussi lancer les tasks VS Code: `App: Local Up`, `App: Local Up (Detached)`, `App: Local Down`, `App: Local Status`.
 
 Execution directe du script (fallback optionnel):
 ```powershell
@@ -132,9 +149,11 @@ node infra/scripts/dev.mjs local up
 ```
 
 Reference commandes:
-`dev` ci-dessous mappe vers `node infra/scripts/dev.mjs` (ou `npm run dev -- <args>`).
+- `npm run dev` demarre directement la stack locale en mode attache (`local up`).
+- `npm run dev:ctl` mappe vers `node infra/scripts/dev.mjs` (usage avance).
 
 Raccourcis frequents a la racine:
+- `npm run dev`
 - `npm run docker:up`
 - `npm run docker:down`
 - `npm run local:up`
@@ -144,17 +163,23 @@ Raccourcis frequents a la racine:
 
 | Commande | Description |
 | --- | --- |
-| `dev up` | Demarre la stack Docker (`api` + `frontend`) et attend les health checks. |
-| `dev down` | Arrete la stack Docker. |
-| `dev logs [api\|frontend]` | Stream les logs Docker (tous les services par defaut). |
-| `dev status` | Affiche le statut Docker et mode local. |
-| `dev doctor` | Verifie les prerequis et affiche la disponibilite des ports. |
-| `dev reset --yes` | Reset l'etat DB/cache/process en local (nettoyage destructif). |
-| `dev local up` | Demarre API + frontend natifs en arriere-plan avec suivi PID. |
-| `dev local down` | Arrete les process locaux demarres par `dev local up`. |
-| `dev local logs [api\|frontend\|all] [--follow]` | Lit les logs locaux dans `.dev/logs`. |
-| `dev local status` | Affiche la sante des process locaux, PID et ports. |
-| `dev local reset --yes` | Meme nettoyage que `dev reset --yes`. |
+| `npm run dev` | Demarre API + frontend en mode foreground dans le terminal courant (fallback ports auto). |
+| `npm run dev:foreground` | Alias explicite de `npm run dev`. |
+| `npm run dev:detached` | Demarre API + frontend natifs en arriere-plan avec suivi PID. |
+| `npm run local:up` | Alias de `npm run dev` (compatibilite). |
+| `npm run dev:ctl -- up` | Demarre la stack Docker (`api` + `frontend`) et attend les health checks. |
+| `npm run dev:ctl -- down` | Arrete la stack Docker. |
+| `npm run dev:ctl -- logs [api\|frontend]` | Stream les logs Docker (tous les services par defaut). |
+| `npm run dev:ctl -- status` | Affiche le statut Docker et mode local. |
+| `npm run dev:ctl -- doctor` | Verifie les prerequis et affiche la disponibilite des ports. |
+| `npm run dev:ctl -- reset local --yes` | Reset scope local (DB/cache/process locaux). |
+| `npm run dev:ctl -- reset docker --yes` | Reset scope Docker (down). |
+| `npm run dev:ctl -- reset all --yes` | Reset scopes Docker + local. |
+| `npm run dev:ctl -- local down` | Arrete les process locaux demarres par `local up`. |
+| `npm run dev:ctl -- local down --orphans` | Tente aussi de fermer les orphelins locaux ecoutant sur 127.0.0.1:8000/5173. |
+| `npm run dev:ctl -- local logs [api\|frontend\|all] [--follow]` | Lit les logs locaux dans `.dev/logs`. |
+| `npm run dev:ctl -- local status` | Affiche la sante des process locaux, PID et ports. |
+| `npm run dev:ctl -- local up --foreground` | Lance API + frontend et bloque le terminal jusqu'a Ctrl+C. |
 
 ### Fallback manuel (sans commande `dev`)
 Backend API:
@@ -178,10 +203,11 @@ Le frontend utilise le proxy Vite pour router `/api` vers `http://localhost:8000
 ## Authentication
 - Endpoint signup: `POST /api/auth/signup`
 - Endpoint login: `POST /api/auth/login`
-- Endpoint forgot-password: `POST /api/auth/forgot-password`
+- Endpoint forgot-password: `POST /api/auth/forgot-password` (accepte `email` seul pour generer un token, ou `email` + `newPassword` pour reset direct en local/demo)
 - Endpoint reset-password: `POST /api/auth/reset-password`
 - Le frontend stocke le JWT dans `localStorage` et envoie le bearer token pour les requetes de reservation.
-- En dev, la reponse forgot-password peut inclure `resetToken` pour faciliter les tests locaux.
+- En dev, la reponse forgot-password peut inclure `resetToken` pour faciliter les tests locaux si vous utilisez le flow token.
+- Le reset direct `email + newPassword` est un raccourci de demo locale; pour un flow classique, utilisez `forgot-password` (token) puis `reset-password`.
 - Comptes TEST dev (fixtures):
   - Compte 1: `employee@company.test` / `ChangeMe123`
   - Compte 2: `employee2@company.test` / `ChangeMe123`
@@ -192,6 +218,7 @@ Le frontend utilise le proxy Vite pour router `/api` vers `http://localhost:8000
 - `/forgot-password`
 - `/reservations/new` (protected)
 - `/reservations` (protected)
+- `/:pathMatch(.*)*` (page not found)
 
 ## Frontend Architecture
 - `frontend/src/app`: bootstrap applicatif, router et styles globaux.
@@ -264,6 +291,7 @@ Les tests backend sont centralises dans `api/tests` avec des suites dediees:
 
 ## CI
 Workflow GitHub Actions: `.github/workflows/ci.yml`
+- Le job `lint` lance les scripts `infra/ci/backend-lint.sh` et `infra/ci/frontend-lint.sh`.
 - Le job backend lance PHPUnit.
 - Le job frontend lance Vitest puis le build.
 - Le job E2E installe Playwright, demarre les services via `node infra/scripts/dev.mjs up`, puis execute les tests Playwright.
@@ -275,7 +303,7 @@ npm run docker:up
 npm run docker:down
 ```
 
-Les fichiers d'integration Docker sont centralises dans `infra/docker/`.
+Le fichier `docker-compose.yml` est a la racine; les Dockerfiles sont dans `infra/docker/`.
 
 Services:
 - `api` sur `http://localhost:8000`

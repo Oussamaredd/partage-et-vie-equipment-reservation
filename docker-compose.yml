@@ -1,28 +1,30 @@
 services:
   api:
     build:
-      context: ../../api
+      context: ./api
       dockerfile: ../infra/docker/api.Dockerfile
     container_name: equipment-api
     working_dir: /app
     ports:
       - "8000:8000"
     volumes:
-      - ../../api:/app
-      - ../../database:/database
+      - ./api:/app
+      - ./database:/database
 
   frontend:
     build:
-      context: ../../frontend
+      context: ./frontend
       dockerfile: ../infra/docker/frontend.Dockerfile
     container_name: equipment-frontend
     working_dir: /app
     environment:
-      - VITE_API_PROXY_TARGET=http://api:8000
+      - VITE_API_PROXY_TARGET=http://host.docker.internal:8000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "5173:5173"
     volumes:
-      - ../../frontend:/app
+      - ./frontend:/app
       - /app/node_modules
     depends_on:
       - api

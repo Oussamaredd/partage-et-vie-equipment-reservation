@@ -3,17 +3,21 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
-    "dev": "node infra/scripts/dev.mjs",
-    "docker:up": "node infra/scripts/dev.mjs up",
-    "docker:down": "node infra/scripts/dev.mjs down",
-    "docker:logs": "node infra/scripts/dev.mjs logs",
-    "docker:status": "node infra/scripts/dev.mjs status",
-    "docker:doctor": "node infra/scripts/dev.mjs doctor",
-    "docker:reset": "node infra/scripts/dev.mjs reset --yes",
-    "local:up": "node infra/scripts/dev.mjs local up",
-    "local:down": "node infra/scripts/dev.mjs local down",
-    "local:logs": "node infra/scripts/dev.mjs local logs all",
-    "local:status": "node infra/scripts/dev.mjs local status",
-    "local:reset": "node infra/scripts/dev.mjs local reset --yes"
+    "dev": "npm run dev:foreground",
+    "dev:foreground": "npm run dev:ctl -- local up --foreground",
+    "dev:detached": "npm run dev:ctl -- local up",
+    "dev:ctl": "node infra/scripts/dev.mjs",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "npm run dev:ctl -- logs",
+    "docker:status": "npm run dev:ctl -- status",
+    "docker:doctor": "npm run dev:ctl -- doctor",
+    "docker:reset": "npm run dev:ctl -- reset docker --yes",
+    "reset:all": "npm run dev:ctl -- reset all --yes",
+    "local:up": "npm run dev",
+    "local:down": "npm run dev:ctl -- local down",
+    "local:logs": "npm run dev:ctl -- local logs all",
+    "local:status": "npm run dev:ctl -- local status",
+    "local:reset": "npm run dev:ctl -- reset local --yes"
   }
 }

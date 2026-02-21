@@ -6,6 +6,8 @@ use App\Auth\Application\Login\LoginInput;
 use App\Auth\Application\Login\LoginService;
 use App\Auth\Application\PasswordReset\RequestPasswordResetInput;
 use App\Auth\Application\PasswordReset\RequestPasswordResetService;
+use App\Auth\Application\PasswordReset\ResetPasswordByEmailInput;
+use App\Auth\Application\PasswordReset\ResetPasswordByEmailService;
 use App\Auth\Application\PasswordReset\ResetPasswordInput;
 use App\Auth\Application\PasswordReset\ResetPasswordService;
 use App\Auth\Application\Signup\SignupInput;
@@ -74,14 +76,32 @@ class AuthController extends AbstractController
     }
 
     #[Route('/api/auth/forgot-password', name: 'api_auth_forgot_password', methods: ['POST'])]
-    public function forgotPassword(Request $request, RequestPasswordResetService $service): JsonResponse
+    public function forgotPassword(
+        Request $request,
+        RequestPasswordResetService $requestPasswordResetService,
+        ResetPasswordByEmailService $resetPasswordByEmailService,
+    ): JsonResponse
     {
         $payload = json_decode($request->getContent(), true);
         if (!is_array($payload)) {
             return $this->json(['message' => 'Invalid JSON payload.'], JsonResponse::HTTP_BAD_REQUEST);
         }
 
-        $result = $service->handle(new RequestPasswordResetInput((string) ($payload['email'] ?? '')));
+        $newPassword = (string) ($payload['newPassword'] ?? '');
+        if ($newPassword !== '') {
+            try {
+                $resetPasswordByEmailService->handle(new ResetPasswordByEmailInput(
+                    (string) ($payload['email'] ?? ''),
+                    $newPassword,
+                ));
+            } catch (InvalidArgumentException $exception) {
+                return $this->json(['message' => $exception->getMessage()], JsonResponse::HTTP_BAD_REQUEST);
+            }
+
+            return $this->json(['message' => 'Password reset successfully.']);
+        }
+
+        $result = $requestPasswordResetService->handle(new RequestPasswordResetInput((string) ($payload['email'] ?? '')));
 
         return $this->json([
             'message' => $result->message,

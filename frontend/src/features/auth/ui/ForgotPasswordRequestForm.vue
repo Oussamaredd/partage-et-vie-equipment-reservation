@@ -3,7 +3,10 @@ import { reactive } from 'vue'
 
 const emit = defineEmits(['submit'])
 
-const form = reactive({ email: '' })
+const form = reactive({
+  email: '',
+  newPassword: '',
+})
 
 function onSubmit() {
   emit('submit', { ...form })
@@ -23,6 +26,17 @@ function onSubmit() {
         required
       />
     </label>
-    <button data-testid="forgot-submit" type="submit">Generate reset token</button>
+    <label>
+      New password
+      <input
+        v-model="form.newPassword"
+        data-testid="forgot-new-password"
+        type="password"
+        placeholder="New password"
+        autocomplete="new-password"
+        required
+      />
+    </label>
+    <button data-testid="forgot-submit" type="submit">Reset password</button>
   </form>
 </template>

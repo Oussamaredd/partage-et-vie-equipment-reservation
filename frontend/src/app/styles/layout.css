@@ -9,7 +9,6 @@
 
 .brand-header,
 .app-header {
-  width: min(1020px, 100%);
   background: linear-gradient(140deg, rgba(255, 255, 255, 0.94), rgba(246, 250, 248, 0.92));
   border: 1px solid var(--border);
   border-radius: 18px;
@@ -18,6 +17,7 @@
 }
 
 .brand-header {
+  width: min(620px, 100%);
   text-align: center;
   padding: 22px 24px;
   animation: rise-in 0.55s ease both;
@@ -48,6 +48,7 @@
 }
 
 .app-header {
+  width: min(760px, 100%);
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
@@ -124,6 +125,18 @@
 
 .panel-head {
   margin-bottom: 20px;
+}
+
+.panel-head-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  justify-content: space-between;
+  align-items: start;
+  gap: 14px;
+}
+
+.panel-head-content {
+  min-width: 0;
 }
 
 .panel-eyebrow {
@@ -224,6 +237,41 @@
   font-size: 0.9rem;
 }
 
+.reservation-delete-top-right {
+  width: auto;
+  min-width: 130px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 0.84rem;
+  border: 1px solid var(--danger-border);
+  background: #ffffff;
+  color: var(--danger-text);
+  font-weight: 700;
+  letter-spacing: 0;
+  box-shadow: none;
+  align-self: flex-start;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.reservation-delete-top-right:hover:not(:disabled) {
+  transform: none;
+  background: var(--danger-bg);
+  border-color: #e7a39a;
+  color: #7f271f;
+}
+
+.reservation-delete-top-right:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(143, 46, 36, 0.2);
+}
+
+.reservation-delete-top-right:disabled {
+  opacity: 0.6;
+  border-color: var(--border);
+  background: var(--surface-soft);
+  color: var(--ink-muted);
+}
+
 .empty-state {
   margin: 0 0 16px;
   padding: 12px;
@@ -290,5 +338,14 @@
   .app-nav a {
     flex: 1;
     text-align: center;
+  }
+
+  .panel-head-row {
+    gap: 10px;
+    grid-template-columns: 1fr;
+  }
+
+  .reservation-delete-top-right {
+    justify-self: end;
   }
 }

@@ -5,6 +5,7 @@ namespace App\Reservation\Infrastructure\Http;
 use App\Auth\Infrastructure\Security\AuthenticatedUserResolver;
 use App\Reservation\Application\CreateReservation\CreateReservationInput;
 use App\Reservation\Application\CreateReservation\CreateReservationService;
+use App\Reservation\Application\DeleteReservation\DeleteReservationService;
 use App\Reservation\Application\ListReservations\ListReservationsService;
 use App\Reservation\Domain\Exception\InvalidReservationDates;
 use App\Reservation\Domain\Exception\ReservationConflict;
@@ -72,5 +73,26 @@ class ReservationController extends AbstractController
         }
 
         return $this->json($service->handle($email));
+    }
+
+    #[Route('/api/reservations/{id}', name: 'api_reservation_delete', requirements: ['id' => '\d+'], methods: ['DELETE'])]
+    public function delete(
+        int $id,
+        Request $request,
+        DeleteReservationService $service,
+        AuthenticatedUserResolver $authenticatedUserResolver,
+    ): JsonResponse
+    {
+        try {
+            $email = $authenticatedUserResolver->resolveEmail($request);
+        } catch (InvalidArgumentException $exception) {
+            return $this->json(['message' => $exception->getMessage()], JsonResponse::HTTP_UNAUTHORIZED);
+        }
+
+        if (!$service->handle($id, $email)) {
+            return $this->json(['message' => 'Reservation not found.'], JsonResponse::HTTP_NOT_FOUND);
+        }
+
+        return $this->json(['message' => 'Reservation deleted successfully.']);
     }
 }

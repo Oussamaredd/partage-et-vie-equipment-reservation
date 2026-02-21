@@ -14,3 +14,10 @@ export function listReservations(token) {
     token,
   })
 }
+
+export function deleteReservation(reservationId, token) {
+  return apiRequest(`/api/reservations/${reservationId}`, {
+    method: 'DELETE',
+    token,
+  })
+}

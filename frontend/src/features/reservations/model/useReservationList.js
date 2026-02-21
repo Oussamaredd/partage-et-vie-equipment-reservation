@@ -1,10 +1,13 @@
 import { ref } from 'vue'
-import { listReservations } from '../api/reservationApi'
+import { deleteReservation, listReservations } from '../api/reservationApi'
 
 export function useReservationList() {
   const items = ref([])
   const loading = ref(true)
   const error = ref('')
+  const deletingId = ref(null)
+  const actionError = ref('')
+  const actionMessage = ref('')
 
   async function load(token) {
     loading.value = true
@@ -19,10 +22,30 @@ export function useReservationList() {
     }
   }
 
+  async function remove(reservationId, token) {
+    deletingId.value = reservationId
+    actionError.value = ''
+    actionMessage.value = ''
+
+    try {
+      const response = await deleteReservation(reservationId, token)
+      actionMessage.value = response?.message ?? 'Reservation deleted successfully.'
+      await load(token)
+    } catch (e) {
+      actionError.value = e instanceof Error ? e.message : 'Unable to delete reservation.'
+    } finally {
+      deletingId.value = null
+    }
+  }
+
   return {
     items,
     loading,
     error,
+    deletingId,
+    actionError,
+    actionMessage,
     load,
+    remove,
   }
 }
