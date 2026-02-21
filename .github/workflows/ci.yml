@@ -27,6 +27,11 @@ jobs:
         with:
           php-version: '8.2'
       - if: matrix.target == 'backend'
+        name: Prepare backend env files for CI
+        run: |
+          cp api/.env.example api/.env
+          cp api/.env.dev.example api/.env.dev
+      - if: matrix.target == 'backend'
         uses: ramsey/composer-install@v3
         with:
           working-directory: api
