@@ -3,7 +3,7 @@
 Petit systeme de reservation de materiel realise pour un test technique Symfony/JS.
 
 ## GUIDE
-Voici le guide pratique, de A a Z, pour utiliser le projet rapidement.
+Voici le guide pratique, pour utiliser le projet rapidement.
 
 - Commencez a la racine du repository.
 - Choisissez un mode d'execution: Docker (recommande pour la stabilite) ou Local (process natifs pour iterer vite).
