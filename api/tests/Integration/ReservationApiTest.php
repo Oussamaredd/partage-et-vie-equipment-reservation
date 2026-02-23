@@ -152,6 +152,123 @@ class ReservationApiTest extends WebTestCase
         self::assertResponseStatusCodeSame(Response::HTTP_BAD_REQUEST);
     }
 
+    public function testCreateReservationReturnsBadRequestForMissingRequiredFields(): void
+    {
+        $client = static::createClient();
+        $token = $this->loginAndGetToken($client);
+
+        $client->request(
+            'POST',
+            '/api/reservations',
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => sprintf('Bearer %s', $token),
+            ],
+            content: json_encode([
+                'equipmentId' => 2,
+                'startDate' => '2026-03-20 09:00:00',
+            ], JSON_THROW_ON_ERROR)
+        );
+
+        self::assertResponseStatusCodeSame(Response::HTTP_BAD_REQUEST);
+        self::assertSame(
+            'Missing required fields.',
+            json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR)['message'] ?? ''
+        );
+    }
+
+    public function testCreateReservationReturnsBadRequestForInvalidJsonPayload(): void
+    {
+        $client = static::createClient();
+        $token = $this->loginAndGetToken($client);
+
+        $client->request(
+            'POST',
+            '/api/reservations',
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => sprintf('Bearer %s', $token),
+            ],
+            content: '{invalid-json'
+        );
+
+        self::assertResponseStatusCodeSame(Response::HTTP_BAD_REQUEST);
+        self::assertSame(
+            'Invalid JSON payload.',
+            json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR)['message'] ?? ''
+        );
+    }
+
+    public function testCreateReservationReturnsBadRequestWhenEquipmentDoesNotExist(): void
+    {
+        $client = static::createClient();
+        $token = $this->loginAndGetToken($client);
+
+        $client->request(
+            'POST',
+            '/api/reservations',
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => sprintf('Bearer %s', $token),
+            ],
+            content: json_encode([
+                'equipmentId' => 999,
+                'startDate' => '2026-03-20 09:00:00',
+                'endDate' => '2026-03-20 18:00:00',
+            ], JSON_THROW_ON_ERROR)
+        );
+
+        self::assertResponseStatusCodeSame(Response::HTTP_BAD_REQUEST);
+        self::assertSame(
+            'Equipment not found.',
+            json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR)['message'] ?? ''
+        );
+    }
+
+    public function testCreateReservationAllowsBackToBackAfterExistingReservation(): void
+    {
+        $client = static::createClient();
+        $token = $this->loginAndGetToken($client);
+
+        $client->request(
+            'POST',
+            '/api/reservations',
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => sprintf('Bearer %s', $token),
+            ],
+            content: json_encode([
+                'equipmentId' => 1,
+                'startDate' => '2026-03-12 18:00:00',
+                'endDate' => '2026-03-13 12:00:00',
+            ], JSON_THROW_ON_ERROR)
+        );
+
+        self::assertResponseStatusCodeSame(Response::HTTP_CREATED);
+    }
+
+    public function testCreateReservationAllowsBackToBackBeforeExistingReservation(): void
+    {
+        $client = static::createClient();
+        $token = $this->loginAndGetToken($client);
+
+        $client->request(
+            'POST',
+            '/api/reservations',
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => sprintf('Bearer %s', $token),
+            ],
+            content: json_encode([
+                'equipmentId' => 1,
+                'startDate' => '2026-03-09 08:00:00',
+                'endDate' => '2026-03-10 09:00:00',
+            ], JSON_THROW_ON_ERROR)
+        );
+
+        self::assertResponseStatusCodeSame(Response::HTTP_CREATED);
+    }
+
     public function testDeleteReservationRequiresAuthentication(): void
     {
         $client = static::createClient();
@@ -239,6 +356,64 @@ class ReservationApiTest extends WebTestCase
             'Reservation not found.',
             json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR)['message'] ?? ''
         );
+    }
+
+    public function testListReservationsRequiresAuthentication(): void
+    {
+        $client = static::createClient();
+        $client->request('GET', '/api/reservations');
+
+        self::assertResponseStatusCodeSame(Response::HTTP_UNAUTHORIZED);
+    }
+
+    public function testListReservationsRejectsInvalidToken(): void
+    {
+        $client = static::createClient();
+        $client->request(
+            'GET',
+            '/api/reservations',
+            server: [
+                'HTTP_AUTHORIZATION' => 'Bearer invalid-token',
+            ],
+        );
+
+        self::assertResponseStatusCodeSame(Response::HTTP_UNAUTHORIZED);
+    }
+
+    public function testListReservationsReturnsCurrentUserReservationsOnly(): void
+    {
+        $client = static::createClient();
+        $token = $this->loginAndGetToken($client);
+
+        $client->request(
+            'POST',
+            '/api/reservations',
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => sprintf('Bearer %s', $token),
+            ],
+            content: json_encode([
+                'equipmentId' => 2,
+                'startDate' => '2026-04-01 09:00:00',
+                'endDate' => '2026-04-01 18:00:00',
+            ], JSON_THROW_ON_ERROR)
+        );
+        self::assertResponseStatusCodeSame(Response::HTTP_CREATED);
+
+        $client->request(
+            'GET',
+            '/api/reservations',
+            server: [
+                'HTTP_AUTHORIZATION' => sprintf('Bearer %s', $token),
+            ],
+        );
+
+        self::assertResponseStatusCodeSame(Response::HTTP_OK);
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($payload);
+        self::assertCount(1, $payload);
+        self::assertSame('employee@company.test', $payload[0]['email'] ?? '');
+        self::assertSame('Sony Alpha 7C', $payload[0]['equipment']['name'] ?? '');
     }
 
     private function resetDatabase(EntityManagerInterface $entityManager): void

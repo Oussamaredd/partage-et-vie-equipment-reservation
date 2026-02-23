@@ -149,6 +149,49 @@ class AuthApiTest extends WebTestCase
         self::assertResponseStatusCodeSame(Response::HTTP_OK);
     }
 
+    public function testSignupReturnsBadRequestForInvalidJsonPayload(): void
+    {
+        $client = static::createClient();
+        $client->request(
+            'POST',
+            '/api/auth/signup',
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: '{invalid-json'
+        );
+
+        self::assertResponseStatusCodeSame(Response::HTTP_BAD_REQUEST);
+    }
+
+    public function testLoginReturnsBadRequestForInvalidJsonPayload(): void
+    {
+        $client = static::createClient();
+        $client->request(
+            'POST',
+            '/api/auth/login',
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: '{invalid-json'
+        );
+
+        self::assertResponseStatusCodeSame(Response::HTTP_BAD_REQUEST);
+    }
+
+    public function testResetPasswordReturnsBadRequestForInvalidToken(): void
+    {
+        $client = static::createClient();
+
+        $client->request(
+            'POST',
+            '/api/auth/reset-password',
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode([
+                'token' => 'invalid-token',
+                'newPassword' => 'AnotherPassword123',
+            ], JSON_THROW_ON_ERROR)
+        );
+
+        self::assertResponseStatusCodeSame(Response::HTTP_BAD_REQUEST);
+    }
+
     private function signupUser(KernelBrowser $client, string $email, string $password): void
     {
         $client->request(
